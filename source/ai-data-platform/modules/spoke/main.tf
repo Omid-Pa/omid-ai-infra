@@ -25,6 +25,7 @@ resource "azurerm_subnet" "platform" {
   resource_group_name  = azurerm_resource_group.spoke.name
   virtual_network_name = azurerm_virtual_network.spoke_vnet.name
   address_prefixes     = [var.platform_subnet_prefix]
+  private_endpoint_network_policies = "Disabled"
 }
 
 # Subnet: private endpoints (if not centralizing to hub)
@@ -148,8 +149,9 @@ resource "azurerm_private_endpoint" "spoke_kv_pe" {
   name                = "pe-spoke-kv-${var.platform_name}-${var.env_name}"
   location            = var.location
   resource_group_name = azurerm_resource_group.spoke.name
+
 # Decide where the private endpoint NIC will live(Place PE in hub subnet or Place PE in spoke subnet)
-  subnet_id = var.place_private_endpoints_in_hub && var.hub_private_endpoints_subnet_id != "" ? var.hub_private_endpoints_subnet_id : azurerm_subnet.private_endpoints.id
+  subnet_id = var.place_private_endpoints_in_hub && data.azurerm_private_dns_zone.kv_priv_hub.id != "" ? data.azurerm_private_dns_zone.kv_priv_hub.id : azurerm_subnet.private_endpoints.id
 
   private_service_connection {
     name                           = "spoke-kv-psc-${var.platform_name}-${var.env_name}"
@@ -161,5 +163,20 @@ resource "azurerm_private_endpoint" "spoke_kv_pe" {
   private_dns_zone_group {
     name = "spoke-kv-dns-${var.platform_name}-${var.env_name}"
     private_dns_zone_ids = [data.azurerm_private_dns_zone.kv_priv_hub.id]
+  }
+}
+
+# Optional databrick
+resource "azurerm_databricks_workspace" "workspace" {
+  count               = var.create_databricks ? 1 : 0
+  name                = var.databricks_workspace_name
+  resource_group_name = azurerm_resource_group.spoke.name
+  location            = var.location
+  sku                 = var.databricks_sku
+
+  custom_parameters {
+    virtual_network_id  = azurerm_virtual_network.spoke_vnet.id
+    public_subnet_name  = azurerm_subnet.platform.name
+    private_subnet_name = azurerm_subnet.platform.name
   }
 }

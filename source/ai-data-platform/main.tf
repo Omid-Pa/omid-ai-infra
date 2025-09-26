@@ -23,7 +23,12 @@ module "spoke_mininganalytics" {
   create_keyvault     = var.create_keyvault
   spoke_keyvault_name = "kv-${var.platfrom_name}-${var.env_name}"
 
+
+  # optional: create a databrick in spoke
+  create_databricks        = var.create_databricks
+  databricks_workspace_name = "databrick-${var.platform_name}-${var.env_name}"
+  databricks_sku           = var.databricks_sku
+
   # choose where to create PEs
   place_private_endpoints_in_hub  = var.place_private_endpoints_in_hub
-  hub_private_endpoints_subnet_id = var.hub_private_endpoints_subnet_id
 }

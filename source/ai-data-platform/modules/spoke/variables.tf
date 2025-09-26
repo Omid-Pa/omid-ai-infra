@@ -30,7 +30,18 @@ variable "place_private_endpoints_in_hub" {
   type    = bool
   default = false
 }
-variable "hub_private_endpoints_subnet_id" {
+
+variable "create_databricks" {
+  type    = bool
+  default = false
+}
+
+variable "databricks_workspace_name" {
   type    = string
   default = ""
+}
+
+variable "databricks_sku" {
+  type    = string
+  default = "standard"
 }

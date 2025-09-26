@@ -14,10 +14,6 @@ variable "hub_openai_private_dns_zone_name" {
   type = string
 }
 
-variable "hub_private_endpoints_subnet_id" {
-  type = string
-}
-
 variable "create_keyvault" {
   type    = bool
   default = false
@@ -52,4 +48,19 @@ variable "env_name" {
     condition     = contains(["dev", "test", "prod"], var.env_name)
     error_message = "Environment must be one of: dev, test, prod"
   }
+}
+
+variable "create_databricks" {
+  type    = bool
+  default = false
+}
+
+variable "databricks_workspace_name" {
+  type    = string
+  default = ""
+}
+
+variable "databricks_sku" {
+  type    = string
+  default = "standard"
 }

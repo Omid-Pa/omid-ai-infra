@@ -8,7 +8,6 @@ module "hub" {
   hub_vnet_prefix    = "10.0.0.0/16"
   pe_subnet_prefix   = "10.0.1.0/24"
   shared_subnet_prefix = "10.0.2.0/24"
-
   keyvault_name      = "kv-shared-hub-${var.env_name}"
   openai_name        = "openai-hub-ai-${var.env_name}" 
 }

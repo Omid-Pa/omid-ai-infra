@@ -61,18 +61,18 @@ data "azurerm_client_config" "current" {}
 
 # Shared Key Vault (in hub)
 resource "azurerm_key_vault" "hub_shared_kv" {
-  name                        = var.keyvault_name
-  location                    = var.location
-  resource_group_name         = azurerm_resource_group.hub.name
-  tenant_id                   = data.azurerm_client_config.current.tenant_id
-  sku_name                    = "standard"
+  name                = var.keyvault_name
+  location            = var.location
+  resource_group_name = azurerm_resource_group.hub.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
 
-public_network_access_enabled = false
+  public_network_access_enabled = false
 
-network_acls {
-  default_action = "Deny"
-  bypass         = "AzureServices"
-}
+  network_acls {
+    default_action = "Deny"
+    bypass         = "AzureServices"
+  }
 
   enabled_for_disk_encryption = true
   purge_protection_enabled    = true
@@ -105,11 +105,11 @@ resource "azurerm_private_endpoint" "kv_pe" {
 # Create Azure OpenAI (Cognitive Services account with kind OpenAI)
 # Note: this requires subscription permission/approval for OpenAI resource creation.
 resource "azurerm_cognitive_account" "openai" {
-  name                = var.openai_name 
-  location            = avr.location
-  resource_group_name = azurerm_resource_group.hub.name
-  sku_name            = "S0"       
-  kind                = "OpenAI" 
+  name                          = var.openai_name
+  location                      = avr.location
+  resource_group_name           = azurerm_resource_group.hub.name
+  sku_name                      = "S0"
+  kind                          = "OpenAI"
   public_network_access_enabled = false
   custom_subdomain_name         = "hub-shared-openai-${var.env_name}"
 

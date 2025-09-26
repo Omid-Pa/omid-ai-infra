@@ -1,5 +1,5 @@
-location      = "westeurope"
-env_name      = "dev"
+location = "westeurope"
+env_name = "dev"
 
 virtual_network = {
   address_space_cidr = "172.16.0.0/15"

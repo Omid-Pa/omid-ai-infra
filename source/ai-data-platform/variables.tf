@@ -2,6 +2,22 @@ variable "location" {
   type = string
 }
 
+variable "hub_vnet_name" {
+  type = string
+}
+
+variable "kv_private_dns_zone_name" {
+  type = string
+}
+
+variable "hub_openai_private_dns_zone_name" {
+  type = string
+}
+
+variable "hub_private_endpoints_subnet_id" {
+  type = string
+}
+
 variable "create_keyvault" {
   type    = bool
   default = false

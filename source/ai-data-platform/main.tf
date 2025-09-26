@@ -11,12 +11,12 @@ module "spoke_mininganalytics" {
   pe_subnet_prefix       = "10.1.2.0/24"
   bastion_subnet_prefix  = "10.1.3.0/24"
 
-  hub_vnet_id             = var.hub_vnet_id
+  hub_vnet_name             = var.hub_vnet_name
   hub_resource_group_name = var.hub_resource_group_name
 
   hub_private_dns_zone_names = [
     var.kv_private_dns_zone_name,
-    var.hub.openai_private_dns_zone_name
+    var.hub_openai_private_dns_zone_name
   ]
 
   # optional: create a Key Vault in spoke
@@ -25,5 +25,5 @@ module "spoke_mininganalytics" {
 
   # choose where to create PEs
   place_private_endpoints_in_hub  = var.place_private_endpoints_in_hub
-  hub_private_endpoints_subnet_id = module.hub.private_endpoints_subnet_id
+  hub_private_endpoints_subnet_id = var.hub_private_endpoints_subnet_id
 }

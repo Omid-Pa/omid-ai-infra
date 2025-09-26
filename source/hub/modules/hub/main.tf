@@ -42,7 +42,7 @@ resource "azurerm_private_dns_zone" "kv_priv" {
 
 # Link DNS zones to the hub vnet
 resource "azurerm_private_dns_zone_virtual_network_link" "openai_link_hub" {
-  name                  = "link-openai-hub"
+  name                  = "link-openai-hub-${var.env_name}"
   resource_group_name   = azurerm_resource_group.hub.name
   private_dns_zone_name = azurerm_private_dns_zone.openai_priv.name
   virtual_network_id    = azurerm_virtual_network.hub.id
@@ -50,7 +50,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "openai_link_hub" {
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "kv_link_hub" {
-  name                  = "link-kv-hub"
+  name                  = "link-kv-hub-${var.env_name}"
   resource_group_name   = azurerm_resource_group.hub.name
   private_dns_zone_name = azurerm_private_dns_zone.kv_priv.name
   virtual_network_id    = azurerm_virtual_network.hub.id
@@ -72,6 +72,7 @@ resource "azurerm_key_vault" "hub_shared_kv" {
   network_acls {
     default_action = "Deny"
     bypass         = "AzureServices"
+    virtual_network_subnet_ids = []
   }
 
   enabled_for_disk_encryption = true

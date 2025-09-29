@@ -11,8 +11,11 @@ module "spoke_mininganalytics" {
   pe_subnet_prefix       = "10.1.2.0/24"
   bastion_subnet_prefix  = "10.1.3.0/24"
 
-  hub_vnet_name             = var.hub_vnet_name
-  hub_resource_group_name = var.hub_resource_group_name
+  hub_vnet_name                     = var.hub_vnet_name
+  hub_resource_group_name           = var.hub_resource_group_name
+  hub_keyvault_name                 = var.hub_keyvault_name
+  hub_openai_account_name           = var.hub_openai_account_name
+  hub_private_endpoints_subnet_name = var.hub_private_endpoints_subnet_name
 
   hub_private_dns_zone_names = [
     var.kv_private_dns_zone_name,
@@ -25,10 +28,10 @@ module "spoke_mininganalytics" {
 
 
   # optional: create a databrick in spoke
-  create_databricks        = var.create_databricks
+  create_databricks         = var.create_databricks
   databricks_workspace_name = "databrick-${var.platform_name}-${var.env_name}"
-  databricks_sku           = var.databricks_sku
+  databricks_sku            = var.databricks_sku
 
   # choose where to create PEs
-  place_private_endpoints_in_hub  = var.place_private_endpoints_in_hub
+  place_private_endpoints_in_hub = var.place_private_endpoints_in_hub
 }

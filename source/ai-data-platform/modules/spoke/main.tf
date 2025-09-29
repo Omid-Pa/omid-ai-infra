@@ -21,10 +21,10 @@ resource "azurerm_virtual_network" "spoke_vnet" {
 
 # Subnet: platform (for Databricks/workloads)
 resource "azurerm_subnet" "platform" {
-  name                 = "snet-workloads-${var.platform_name}-${var.env_name}"
-  resource_group_name  = azurerm_resource_group.spoke.name
-  virtual_network_name = azurerm_virtual_network.spoke_vnet.name
-  address_prefixes     = [var.platform_subnet_prefix]
+  name                              = "snet-workloads-${var.platform_name}-${var.env_name}"
+  resource_group_name               = azurerm_resource_group.spoke.name
+  virtual_network_name              = azurerm_virtual_network.spoke_vnet.name
+  address_prefixes                  = [var.platform_subnet_prefix]
   private_endpoint_network_policies = "Disabled"
 }
 
@@ -109,7 +109,7 @@ resource "azurerm_virtual_network_peering" "hub_to_spoke" {
 
 # Private DNS Zone Linking to spoke vent
 resource "azurerm_private_dns_zone_virtual_network_link" "hub_zone_links" {
-  for_each = toset(var.hub_private_dns_zone_names)
+  for_each              = toset(var.hub_private_dns_zone_names)
   name                  = "link-${replace(each.value, ".", "-")}-${var.platform_name}-${var.env_name}"
   resource_group_name   = var.hub_resource_group_name
   private_dns_zone_name = each.value
@@ -119,17 +119,17 @@ resource "azurerm_private_dns_zone_virtual_network_link" "hub_zone_links" {
 
 # Optional Key Vault
 resource "azurerm_key_vault" "spoke_kv" {
-  count                       = var.create_keyvault ? 1 : 0
-  name                        = var.spoke_keyvault_name
-  location                    = var.location
-  resource_group_name         = azurerm_resource_group.spoke.name
-  tenant_id                   = data.azurerm_client_config.current.tenant_id
-  sku_name                    = "standard"
+  count                         = var.create_keyvault ? 1 : 0
+  name                          = var.spoke_keyvault_name
+  location                      = var.location
+  resource_group_name           = azurerm_resource_group.spoke.name
+  tenant_id                     = data.azurerm_client_config.current.tenant_id
+  sku_name                      = "standard"
   public_network_access_enabled = false
 
   network_acls {
-    default_action = "Deny"
-    bypass         = "AzureServices"
+    default_action             = "Deny"
+    bypass                     = "AzureServices"
     virtual_network_subnet_ids = []
   }
 
@@ -143,6 +143,12 @@ data "azurerm_private_dns_zone" "kv_priv_hub" {
   resource_group_name = var.hub_resource_group_name
 }
 
+data "azurerm_subnet" "hub_private_endpoints" {
+  name                 = var.hub_private_endpoints_subnet_name
+  virtual_network_name = var.hub_vnet_name
+  resource_group_name  = var.hub_resource_group_name
+}
+
 # Private Endpoint for Key Vault
 resource "azurerm_private_endpoint" "spoke_kv_pe" {
   count               = var.create_keyvault ? 1 : 0
@@ -150,8 +156,9 @@ resource "azurerm_private_endpoint" "spoke_kv_pe" {
   location            = var.location
   resource_group_name = azurerm_resource_group.spoke.name
 
-# Decide where the private endpoint NIC will live(Place PE in hub subnet or Place PE in spoke subnet)
-  subnet_id = var.place_private_endpoints_in_hub && data.azurerm_private_dns_zone.kv_priv_hub.id != "" ? data.azurerm_private_dns_zone.kv_priv_hub.id : azurerm_subnet.private_endpoints.id
+  # Decide where the private endpoint NIC will live(Place PE in hub subnet or Place PE in spoke subnet)
+  subnet_id = var.place_private_endpoints_in_hub && var.hub_private_endpoints_subnet_id != "" ? var.hub_private_endpoints_subnet_id : azurerm_subnet.private_endpoints.id
+
 
   private_service_connection {
     name                           = "spoke-kv-psc-${var.platform_name}-${var.env_name}"
@@ -161,7 +168,7 @@ resource "azurerm_private_endpoint" "spoke_kv_pe" {
   }
 
   private_dns_zone_group {
-    name = "spoke-kv-dns-${var.platform_name}-${var.env_name}"
+    name                 = "spoke-kv-dns-${var.platform_name}-${var.env_name}"
     private_dns_zone_ids = [data.azurerm_private_dns_zone.kv_priv_hub.id]
   }
 }
@@ -179,4 +186,82 @@ resource "azurerm_databricks_workspace" "workspace" {
     public_subnet_name  = azurerm_subnet.platform.name
     private_subnet_name = azurerm_subnet.platform.name
   }
+}
+
+# Provide access for Terraform to create Notebook + Job (inside Databricks)
+provider "databricks" {
+  host                        = azurerm_databricks_workspace.workspace.workspace_url
+  azure_workspace_resource_id = azurerm_databricks_workspace.workspace.id
+  azure_use_msi               = true # use Managed Identity for auth
+}
+
+# RBAC
+data "azuread_group" "team_contributor" {
+  display_name     = "${var.platform_name}-${var.env_name}-contributor"
+  security_enabled = true
+}
+
+data "azuread_group" "team_owner" {
+  display_name     = "${var.platform_name}-${var.env_name}-owner"
+  security_enabled = true
+}
+
+data "azurerm_key_vault" "hub_kv" {
+  name                = var.hub_keyvault_name
+  resource_group_name = var.hub_resource_group_name
+}
+
+
+# Give access to databrick
+resource "azurerm_role_assignment" "team_owner_databricks_owner" {
+  scope                = azurerm_databricks_workspace.this.id
+  name                 = uuidv5("oid", join("", ["Owner", azurerm_databricks_workspace.this.id, data.azuread_group.team_owner.object_id]))
+  role_definition_name = "Owner"
+  principal_id         = data.azuread_group.team_owner.object_id
+}
+
+
+# Give access to spoke kv
+resource "azurerm_role_assignment" "team_owner_kv_administrator" {
+  scope                = azurerm_key_vault.spoke_kv.id
+  name                 = uuidv5("oid", join("", ["Key Vault Administrator", azurerm_key_vault.spoke_kv.id, data.azuread_group.team_owner.object_id]))
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = data.azuread_group.team_owner.object_id
+}
+
+resource "azurerm_role_assignment" "team_contributor_kv_contributor" {
+  scope                = azurerm_key_vault.spoke_kv.id
+  name                 = uuidv5("oid", join("", ["Key Vault Contributor", azurerm_key_vault.spoke_kv.id, data.azuread_group.team_contributor]))
+  role_definition_name = "Key Vault Contributor"
+  principal_id         = data.azuread_group.team_contributor
+}
+
+# Give access to hub kv
+resource "azurerm_role_assignment" "team_owner_hub_kv_user" {
+  scope                = data.azurerm_key_vault.hub_kv.id
+  name                 = uuidv5("oid", join("", ["Key Vault Secrets User", data.azurerm_key_vault.hub_kv.id, data.azuread_group.team_owner.object_id]))
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = data.azuread_group.team_owner.object_id
+}
+
+resource "azurerm_role_assignment" "team_contributor_hub_kv_contributor" {
+  scope                = data.azurerm_key_vault.hub_kv.id
+  name                 = uuidv5("oid", join("", ["Key Vault Secrets User", data.azurerm_key_vault.hub_kv.id, data.azuread_group.team_contributor]))
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = data.azuread_group.team_contributor
+}
+
+# Give access to hub open-ai
+resource "azurerm_role_assignment" "team_owner_openai_contributor" {
+  scope                = data.azurerm_cognitive_account.hub_openai.id
+  name                 = uuidv5("oid", join("", ["Cognitive Services OpenAI Contributor", data.azurerm_cognitive_account.hub_openai.id, data.azuread_group.team_owner.object_id]))
+  role_definition_name = "Cognitive Services OpenAI Contributor"
+  principal_id         = data.azuread_group.team_owner.object_id
+}
+
+resource "azurerm_role_assignment" "team_contributor_openai_user" {
+  scope                = data.azurerm_cognitive_account.hub_openai.id
+  name                 = uuidv5("oid", join("", ["Cognitive Services User", data.azurerm_cognitive_account.hub_openai.id, data.azuread_group.team_contributor.object_id]))
+  role_definition_name = "Cognitive Services User"
+  principal_id         = data.azuread_group.team_contributor.object_id
 }

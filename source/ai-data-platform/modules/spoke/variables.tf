@@ -45,3 +45,15 @@ variable "databricks_sku" {
   type    = string
   default = "standard"
 }
+
+variable "hub_keyvault_name" {
+  type = string
+}
+
+variable "hub_openai_account_name" {
+  type = string
+}
+
+variable "hub_private_endpoints_subnet_name" {
+  type = string
+}

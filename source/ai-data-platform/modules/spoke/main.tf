@@ -190,9 +190,9 @@ resource "azurerm_databricks_workspace" "workspace" {
 
 # Provide access for Terraform to create Notebook + Job (inside Databricks)
 provider "databricks" {
-  host                        = azurerm_databricks_workspace.workspace.workspace_url
-  azure_workspace_resource_id = azurerm_databricks_workspace.workspace.id
-  azure_use_msi               = true # use Managed Identity for auth
+  host                        = var.create_databricks ? azurerm_databricks_workspace.workspace[0].workspace_url : null
+  azure_workspace_resource_id = var.create_databricks ? azurerm_databricks_workspace.workspace[0].id : null
+  azure_use_msi               = true
 }
 
 # RBAC
@@ -211,26 +211,24 @@ data "azurerm_key_vault" "hub_kv" {
   resource_group_name = var.hub_resource_group_name
 }
 
-
 # Give access to databrick
 resource "azurerm_role_assignment" "team_owner_databricks_owner" {
-  scope                = azurerm_databricks_workspace.this.id
+  scope                = azurerm_databricks_workspace.workspace[0].id
   name                 = uuidv5("oid", join("", ["Owner", azurerm_databricks_workspace.this.id, data.azuread_group.team_owner.object_id]))
   role_definition_name = "Owner"
   principal_id         = data.azuread_group.team_owner.object_id
 }
 
-
 # Give access to spoke kv
 resource "azurerm_role_assignment" "team_owner_kv_administrator" {
-  scope                = azurerm_key_vault.spoke_kv.id
+  scope                = azurerm_key_vault.spoke_kv[0].id
   name                 = uuidv5("oid", join("", ["Key Vault Administrator", azurerm_key_vault.spoke_kv.id, data.azuread_group.team_owner.object_id]))
   role_definition_name = "Key Vault Administrator"
   principal_id         = data.azuread_group.team_owner.object_id
 }
 
 resource "azurerm_role_assignment" "team_contributor_kv_contributor" {
-  scope                = azurerm_key_vault.spoke_kv.id
+  scope                = azurerm_key_vault.spoke_kv[0].id
   name                 = uuidv5("oid", join("", ["Key Vault Contributor", azurerm_key_vault.spoke_kv.id, data.azuread_group.team_contributor]))
   role_definition_name = "Key Vault Contributor"
   principal_id         = data.azuread_group.team_contributor

@@ -70,8 +70,8 @@ resource "azurerm_key_vault" "hub_shared_kv" {
   public_network_access_enabled = false
 
   network_acls {
-    default_action = "Deny"
-    bypass         = "AzureServices"
+    default_action             = "Deny"
+    bypass                     = "AzureServices"
     virtual_network_subnet_ids = []
   }
 

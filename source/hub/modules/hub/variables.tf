@@ -11,11 +11,11 @@ variable "env_name" {
   }
 }
 
-variable " hub_rg_name  " {
+variable "hub_rg_name" {
   type = string
 }
 
-variable "hub_vnet_name " {
+variable "hub_vnet_name" {
   type = string
 }
 
@@ -27,7 +27,7 @@ variable "hub_vnet_prefix" {
   type = string
 }
 
-variable "pe_subnet_prefix " {
+variable "pe_subnet_prefix" {
   type = string
 }
 
@@ -39,6 +39,6 @@ variable "keyvault_name" {
   type = string
 }
 
-variable "openai_name " {
+variable "openai_name" {
   type = string
 }

@@ -149,6 +149,12 @@ data "azurerm_subnet" "hub_private_endpoints" {
   resource_group_name  = var.hub_resource_group_name
 }
 
+data "azurerm_subnet" "hub_private_endpoints" {
+  name                 = var.hub_private_endpoints_subnet_name
+  virtual_network_name = var.hub_vnet_name
+  resource_group_name  = var.hub_resource_group_name
+}
+
 # Private Endpoint for Key Vault
 resource "azurerm_private_endpoint" "spoke_kv_pe" {
   count               = var.create_keyvault ? 1 : 0
@@ -157,7 +163,7 @@ resource "azurerm_private_endpoint" "spoke_kv_pe" {
   resource_group_name = azurerm_resource_group.spoke.name
 
   # Decide where the private endpoint NIC will live(Place PE in hub subnet or Place PE in spoke subnet)
-  subnet_id = var.place_private_endpoints_in_hub && var.hub_private_endpoints_subnet_id != "" ? var.hub_private_endpoints_subnet_id : azurerm_subnet.private_endpoints.id
+  subnet_id = var.place_private_endpoints_in_hub && data.azurerm_subnet.hub_private_endpoints.id != "" ? data.azurerm_subnet.hub_private_endpoints.id : azurerm_subnet.private_endpoints.id
 
 
   private_service_connection {
@@ -195,6 +201,59 @@ provider "databricks" {
   azure_use_msi               = true
 }
 
+# Create accessConnector to get a managed identity.
+resource "azapi_resource" "databricks_access_connector" {
+  type      = "Microsoft.Databricks/accessConnectors@2022-04-01-preview"
+  name      = "${var.databricks_workspace_name}-ac"
+  location  = var.location
+  parent_id = azurerm_resource_group.spoke.id
+
+  body = jsonencode({
+    identity = {
+      type = "SystemAssigned"
+    }
+  })
+}
+
+# Storage account
+resource "azurerm_storage_account" "databricks_storage" {
+  name                     = "${var.platform_name}${var.env_name}stg"
+  resource_group_name      = azurerm_resource_group.spoke.name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  is_hns_enabled           = true # ADLS Gen2
+
+  # Add security measures
+  allow_nested_items_to_be_public = false
+  shared_access_key_enabled       = false
+  public_network_access_enabled   = true # or make it false and create private endpoint
+  blob_properties {
+    delete_retention_policy {
+      days = 14
+    }
+  }
+  network_rules {
+    default_action             = "Deny"
+    bypass                     = ["AzureServices"]
+    virtual_network_subnet_ids = [azurerm_subnet.platform.id]
+    ip_rules                   = []
+  }
+}
+
+# Container
+resource "azurerm_storage_container" "databricks_container" {
+  name                  = "data-${var.platform_name}${var.env_name}"
+  storage_account_id    = azurerm_storage_account.state.id
+  container_access_type = "private"
+}
+
+resource "azurerm_role_assignment" "databricks_storage_blob_contributor" {
+  scope                = azurerm_storage_account.databricks_storage.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azapi_resource.databricks_access_connector.identity[0].principal_id
+}
+
 # RBAC
 data "azuread_group" "team_contributor" {
   display_name     = "${var.platform_name}-${var.env_name}-contributor"
@@ -214,9 +273,16 @@ data "azurerm_key_vault" "hub_kv" {
 # Give access to databrick
 resource "azurerm_role_assignment" "team_owner_databricks_owner" {
   scope                = azurerm_databricks_workspace.workspace[0].id
-  name                 = uuidv5("oid", join("", ["Owner", azurerm_databricks_workspace.this.id, data.azuread_group.team_owner.object_id]))
+  name                 = uuidv5("oid", join("", ["Owner", azurerm_databricks_workspace.workspace[0].id, data.azuread_group.team_owner.object_id]))
   role_definition_name = "Owner"
   principal_id         = data.azuread_group.team_owner.object_id
+}
+
+resource "azurerm_role_assignment" "team_contributor_databricks_contributor" {
+  scope                = azurerm_databricks_workspace.workspace[0].id
+  name                 = uuidv5("oid", join("", ["Contributor", azurerm_databricks_workspace.workspace[0].id, data.azuread_group.team_contributor.object_id]))
+  role_definition_name = "Contributor"
+  principal_id         = data.azuread_group.team_contributor.object_id
 }
 
 # Give access to spoke kv

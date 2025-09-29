@@ -1,0 +1,232 @@
+name: Deploy Terraform
+
+on:
+  workflow_call:
+    inputs:
+      terraform-directory-name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      region:
+        required: false
+        type: string
+      useK8sContext:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  terraform-plan:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment}}
+    defaults:
+      run:
+        shell: sh
+    env:
+      target-directory: ./src/terraform/${{ inputs.terraform-directory-name }}
+      environment-region: ${{ inputs.region != '' && format('{0}-{1}', inputs.region, inputs.environment) || inputs.environment }}
+      # The "ARM_*" variables are automatically picked up by Terraform when running plan/apply
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      ARM_USE_AZUREAD: true
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Get GitHub Actions runner IP
+        id: get_ip
+        run: |
+          echo "RUNNER_IP=$(curl -s https://api.ipify.org)" >> $GITHUB_ENV
+          echo "Runner IP: $RUNNER_IP"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Add kubelogin
+        uses: azure/use-kubelogin@v1
+        if: ${{ inputs.useK8sContext }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          kubelogin-version: "latest"
+
+      - name: Set kubernetes context
+        if: ${{ inputs.useK8sContext }}
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: rg-kafka-${{ env.environment-region }}
+          cluster-name: aks-kafka-${{ env.environment-region }}
+          use-kubelogin: true
+          admin: true
+
+      - name: Enable storage account access
+        run: |
+          az storage account update \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --name ststatekafkaglobal${{ inputs.environment }} \
+            --public-network-access Enabled
+
+          az storage account network-rule add \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --account-name ststatekafkaglobal${{ inputs.environment }} \
+            --ip-address $RUNNER_IP
+
+      - name: Wait for network propagation
+        run: sleep 30
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      # Azure credential variables needs to be explicitly provided to connect to the backend state storage account
+      - name: Initialize Terraform 🎬
+        working-directory: ${{ env.target-directory }}
+        run: |
+          terraform init \
+          -backend-config="envs/${{ inputs.environment }}/${{ env.environment-region }}.backend.cfg" \
+          -backend-config="use_oidc=${{ env.ARM_USE_OIDC }}" \
+          -backend-config="client_id=${{ env.ARM_CLIENT_ID }}" \
+          -backend-config="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -backend-config="tenant_id=${{ env.ARM_TENANT_ID }}" \
+          -backend-config="use_azuread_auth=${{ env.ARM_USE_AZUREAD }}"
+
+      - name: Validate Terraform files
+        working-directory: ${{ env.target-directory }}
+        run: terraform validate
+
+      - name: Check format of Terraform files
+        working-directory: ${{ env.target-directory }}
+        run: terraform fmt -check
+
+      - name: Plan Terraform changes
+        working-directory: ${{ env.target-directory }}
+        run: terraform plan -var-file="envs/${{ inputs.environment }}/${{ env.environment-region }}.tfvars" -out=plans.tfplan -lock=false
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ inputs.environment }}
+          path: ${{ env.target-directory }}/plans.tfplan
+          retention-days: 3
+
+      - name: Remove IP from Azure Storage Account network rules
+        if: always()
+        run: |
+          az storage account network-rule remove \
+            --resource-group  rg-state-kafka-global-${{ inputs.environment }} \
+            --account-name ststatekafkaglobal${{ inputs.environment }} \
+            --ip-address $RUNNER_IP
+
+          az storage account update \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --name ststatekafkaglobal${{ inputs.environment }} \
+            --public-network-access Disabled
+
+  terraform-apply:
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    environment: ${{ inputs.environment }}-validation # approval required here
+    defaults:
+      run:
+        shell: sh
+    env:
+      target-directory: ./src/terraform/${{ inputs.terraform-directory-name }}
+      environment-region: ${{ inputs.region != '' && format('{0}-{1}', inputs.region, inputs.environment) || inputs.environment }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      ARM_USE_AZUREAD: true
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-${{ inputs.environment }}
+          path: ${{ env.target-directory }}
+
+      - name: Get GitHub Actions runner IP
+        id: get_ip
+        run: |
+          echo "RUNNER_IP=$(curl -s https://api.ipify.org)" >> $GITHUB_ENV
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Add kubelogin (if using K8s)
+        uses: azure/use-kubelogin@v1
+        if: ${{ inputs.useK8sContext }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          kubelogin-version: "latest"
+
+      - name: Set Kubernetes context (if using K8s)
+        if: ${{ inputs.useK8sContext }}
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: rg-kafka-${{ env.environment-region }}
+          cluster-name: aks-kafka-${{ env.environment-region }}
+          use-kubelogin: true
+          admin: true
+
+      - name: Enable storage account access
+        run: |
+          az storage account update \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --name ststatekafkaglobal${{ inputs.environment }} \
+            --public-network-access Enabled
+
+          az storage account network-rule add \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --account-name ststatekafkaglobal${{ inputs.environment }} \
+            --ip-address $RUNNER_IP
+
+      - name: Wait for network propagation
+        run: sleep 30
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        working-directory: ${{ env.target-directory }}
+        run: |
+          terraform init \
+            -backend-config="envs/${{ inputs.environment }}/${{ env.environment-region }}.backend.cfg" \
+            -backend-config="use_oidc=${{ env.ARM_USE_OIDC }}" \
+            -backend-config="client_id=${{ env.ARM_CLIENT_ID }}" \
+            -backend-config="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -backend-config="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -backend-config="use_azuread_auth=${{ env.ARM_USE_AZUREAD }}"
+
+      - name: Terraform Apply
+        working-directory: ${{ env.target-directory }}
+        run: terraform apply -lock=false plans.tfplan
+
+      - name: Cleanup storage account access
+        if: always()
+        run: |
+          az storage account network-rule remove \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --account-name ststatekafkaglobal${{ inputs.environment }} \
+            --ip-address $RUNNER_IP || true
+
+          az storage account update \
+            --resource-group rg-state-kafka-global-${{ inputs.environment }} \
+            --name ststatekafkaglobal${{ inputs.environment }} \
+            --public-network-access Disabled
